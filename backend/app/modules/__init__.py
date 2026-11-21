@@ -1,7 +1,6 @@
 """邻题空桩：同仓换主链路时实现其一，勿同构换皮。"""
 STUBS = [
     "same_day_multi_change",
-    "late_snapshot_apply",
     "null_to_value_open",
     "logical_delete_close",
     "current_mirror_resync",

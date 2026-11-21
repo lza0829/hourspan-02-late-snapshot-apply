@@ -2,6 +2,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
 from app.modules import STUBS
+from app.modules.late_snapshot_apply import LateApplyError, attest_late
 from app.services import catalog, detect, ingest, scd
 
 router = APIRouter(prefix="/api")
@@ -126,7 +127,43 @@ def quarantine():
 @router.post("/ingest/run")
 def run_ingest(body: dict | None = Body(None)):
     name = (body or {}).get("fixture", "ingest_change_batch.json")
-    return ingest.run_batch(name)
+    try:
+        return ingest.run_batch(name)
+    except LateApplyError as exc:
+        raise HTTPException(409, f"迟到缝链失败闭，整笔回滚：{exc}") from exc
+
+
+@router.get("/late/audit")
+def late_audit(store_id: str | None = None):
+    conn = connect()
+    try:
+        if store_id:
+            rows = conn.execute(
+                "SELECT * FROM late_snapshot_audit WHERE store_id=? ORDER BY id",
+                (store_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM late_snapshot_audit ORDER BY store_id, id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.get("/late/attest")
+def late_attest(store_id: str | None = None):
+    """迟到缝链核证只读接口：原镜 as_of、缝入 hist、现镜 as_of 三方互证。"""
+    conn = connect()
+    try:
+        results = attest_late(conn, store_id)
+        return {
+            "checked": len(results),
+            "failed": sum(1 for r in results if not r["valid"]),
+            "results": results,
+        }
+    finally:
+        conn.close()
 
 
 @router.post("/detect/run")
@@ -140,7 +177,10 @@ def run_scd(body: dict = Body(...)):
     run_id = body.get("detect_run_id")
     if not run_id:
         raise HTTPException(400, "需要 detect_run_id")
-    return scd.apply_type2(run_id)
+    try:
+        return scd.apply_type2(run_id)
+    except LateApplyError as exc:
+        raise HTTPException(409, f"迟到快照禁止盖写当前镜：{exc}") from exc
 
 
 @router.post("/proofs/rebuild")

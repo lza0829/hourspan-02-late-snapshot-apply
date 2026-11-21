@@ -87,10 +87,25 @@ CREATE TABLE IF NOT EXISTS scd_proofs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS late_snapshot_audit (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  snapshot_id TEXT NOT NULL,
+  late_as_of_ts TEXT NOT NULL,
+  mirror_as_of_before TEXT NOT NULL,
+  split_hist_id TEXT,
+  stitched_hist_id TEXT NOT NULL,
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_hist_store_current
   ON dim_store_hours_hist(store_id, is_current);
 CREATE INDEX IF NOT EXISTS idx_snap_store_ts
   ON source_snapshots(store_id, as_of_ts);
+CREATE INDEX IF NOT EXISTS idx_late_audit_store
+  ON late_snapshot_audit(store_id, id);
 """
 
 

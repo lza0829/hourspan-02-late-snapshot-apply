@@ -2,6 +2,7 @@ import json
 from uuid import uuid4
 
 from app.db import connect
+from app.modules.late_snapshot_apply import LateApplyError
 from app.seed import now_iso, row_hash
 
 
@@ -17,6 +18,24 @@ def apply_type2(detect_run_id: str):
             return {"ok": False, "message": "检测跑次不存在"}
         report = json.loads(run["report_json"])
         changes = report.get("changes", [])
+        # 失败闭前置：迟到快照不得经检测/Type2 路径拖回当前镜
+        for ch in changes:
+            snap = conn.execute(
+                "SELECT as_of_ts, store_id FROM source_snapshots WHERE id=?",
+                (ch["snapshot_id"],),
+            ).fetchone()
+            if not snap:
+                continue
+            mirror = conn.execute(
+                "SELECT as_of_ts FROM dim_store_hours_current WHERE store_id=?",
+                (snap["store_id"],),
+            ).fetchone()
+            if mirror and snap["as_of_ts"] < mirror["as_of_ts"]:
+                raise LateApplyError(
+                    f"快照 {snap['store_id']} as_of={snap['as_of_ts']} 严格早于镜 "
+                    f"as_of={mirror['as_of_ts']}，禁止经 Type2 盖写当前镜；"
+                    "迟到快照须由入档分流缝入历史链"
+                )
         applied = []
         for ch in changes:
             store_id = ch["store_id"]
